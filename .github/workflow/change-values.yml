@@ -1,0 +1,65 @@
+
+on:
+  workflow_call:
+    inputs:
+      secret_name:
+        required: true
+        type: string
+        description: "Secret name in kubernetes cluster"
+        default: "secret"
+      namespace:
+        required: true
+        type: string
+        description: "Namespace name in kubernetes cluster"
+        default: "default"
+    secrets:
+      sa_secret:
+        description: 'Service account secret (run kubectl get serviceaccounts <service-account-name> -o yaml and copy the service-account-secret-name)'
+        required: true
+      cluster_url:
+        description: 'Cluster Url'
+        required: true
+      PASSWORD_DB:
+        required: true
+      TOKEN_GITHUB:
+        required: true
+jobs:
+  deployment:
+    name: Update deployment
+    runs-on: ubuntu-20.04
+    steps:
+    - name: Checkout branch
+      uses: actions/checkout@v2
+
+    - uses: azure/k8s-set-context@v3
+      with:
+        method: service-account
+        k8s-url: ${{ secrets.cluster_url }}
+        k8s-secret: ${( secrets.sa_secret )}
+
+    - name: Create secret for Kubernetes
+      uses: azure/k8s-create-secret@v2
+      with:
+        namespace: ${{ inputs.namespace }}
+        secret-type: 'generic'
+        secret-name: ${{ inputs.secret_name }}
+        stringData: |-
+          {
+          "PASSWORD_DB": ${{ secrets.PASSWORD_DB }},
+          }
+
+    - name: Install yq
+      run: |
+        wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq && chmod +x /usr/bin/yq
+
+    - name: Update Infra Version
+      run: |
+          export TAG=$()
+          yq -i '.app.image.tag = strenv(TAG)' ./kubernetes/values.yaml
+
+    - name: Commit and push changes
+      uses: devops-infra/action-commit-push@v0.3
+      with:
+        github_token: ${{ secrets.TOKEN_GITHUB }}
+        commit_prefix: "[skip ci]"
+        commit_message: "Version updated"
